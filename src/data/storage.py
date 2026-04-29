@@ -8,9 +8,15 @@ from decimal import Decimal
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Iterator
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from dataclasses import asdict
+
+# Optional pyarrow import - fallback to CSV if not available
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    HAS_PYARROW = True
+except ImportError:
+    HAS_PYARROW = False
 
 from .models import Symbol, Bar, Tick, Resolution, DataType, MarketData
 from ..utils.logger import get_logger
@@ -73,12 +79,14 @@ class DataStorage:
     
     def _get_bar_path(self, symbol: Symbol, resolution: Resolution) -> Path:
         """Get storage path for bar data"""
-        filename = f"{symbol.ticker}_{resolution.value}.parquet"
+        ext = "parquet" if HAS_PYARROW else "csv"
+        filename = f"{symbol.ticker}_{resolution.value}.{ext}"
         return self._bar_dir / filename
     
     def _get_tick_path(self, symbol: Symbol, date: datetime) -> Path:
         """Get storage path for tick data"""
-        filename = f"{symbol.ticker}_{date.strftime('%Y%m%d')}.parquet"
+        ext = "parquet" if HAS_PYARROW else "csv"
+        filename = f"{symbol.ticker}_{date.strftime('%Y%m%d')}.{ext}"
         return self._tick_dir / filename
     
     def save_bars(
@@ -107,9 +115,12 @@ class DataStorage:
         
         df = pd.DataFrame(data)
         
-        # Save to Parquet with compression
-        table = pa.Table.from_pandas(df)
-        pq.write_table(table, file_path, compression='zstd')
+        # Save to Parquet with compression (if available) or CSV
+        if HAS_PYARROW:
+            table = pa.Table.from_pandas(df)
+            pq.write_table(table, file_path, compression='zstd')
+        else:
+            df.to_csv(file_path, index=False)
         
         # Update metadata
         start_date = min(b.timestamp for b in bars)
@@ -132,11 +143,21 @@ class DataStorage:
         file_path = self._get_bar_path(symbol, resolution)
         
         if not file_path.exists():
-            return []
+            # Try alternative extension
+            alt_ext = "csv" if HAS_PYARROW else "parquet"
+            alt_path = file_path.with_suffix(f".{alt_ext}")
+            if alt_path.exists():
+                file_path = alt_path
+            else:
+                return []
         
         try:
-            table = pq.read_table(file_path)
-            df = table.to_pandas()
+            # Load from Parquet or CSV
+            if HAS_PYARROW and file_path.suffix == '.parquet':
+                table = pq.read_table(file_path)
+                df = table.to_pandas()
+            else:
+                df = pd.read_csv(file_path)
             
             # Filter by date range
             df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -187,8 +208,11 @@ class DataStorage:
             })
         
         df = pd.DataFrame(data)
-        table = pa.Table.from_pandas(df)
-        pq.write_table(table, file_path, compression='zstd')
+        if HAS_PYARROW:
+            table = pa.Table.from_pandas(df)
+            pq.write_table(table, file_path, compression='zstd')
+        else:
+            df.to_csv(file_path, index=False)
         
         logger.debug(f"Saved {len(ticks)} ticks for {symbol.ticker} on {date.date()}")
     
@@ -207,10 +231,25 @@ class DataStorage:
         while current_date <= end_date:
             file_path = self._get_tick_path(symbol, datetime.combine(current_date, datetime.min.time()))
             
+            # Try alternative extension if primary doesn't exist
+            if not file_path.exists():
+                alt_ext = "csv" if HAS_PYARROW else "parquet"
+                alt_path = file_path.with_suffix(f".{alt_ext}")
+                if alt_path.exists():
+                    file_path = alt_path
+                else:
+                    current_date += timedelta(days=1)
+                    continue
+            
             if file_path.exists():
                 try:
-                    table = pq.read_table(file_path)
-                    df = table.to_pandas()
+                    # Load from Parquet or CSV
+                    if HAS_PYARROW and file_path.suffix == '.parquet':
+                        table = pq.read_table(file_path)
+                        df = table.to_pandas()
+                    else:
+                        df = pd.read_csv(file_path)
+                    
                     df['timestamp'] = pd.to_datetime(df['timestamp'])
                     
                     # Filter time range on first and last day
