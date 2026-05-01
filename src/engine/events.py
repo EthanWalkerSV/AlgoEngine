@@ -53,6 +53,12 @@ class EventType(Enum):
     CUSTOM = auto()
     SIGNAL = auto()
     ALERT = auto()
+    
+    # WebSocket events
+    WEBSOCKET_MESSAGE = auto()
+    WEBSOCKET_ERROR = auto()
+    WEBSOCKET_CONNECTED = auto()
+    WEBSOCKET_DISCONNECTED = auto()
 
 
 @dataclass

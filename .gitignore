@@ -37,15 +37,17 @@ ENV/
 logs/
 *.log
 
-# Data
-data/
-*.csv
-*.parquet
-*.db
-*.sqlite
+# Data - exclude runtime data but keep source
+data/cache/
+data/historical/
+data/*.csv
+data/*.parquet
+data/*.db
+data/*.sqlite
 
-# Allow source data module
+# Allow source data module and empty data directory
 !src/data/
+!data/.gitkeep
 
 # Environment
 .env
@@ -62,7 +64,14 @@ htmlcov/
 Thumbs.db
 
 # Project specific
+.project/
 *.key
 *.secret
 config/local.yaml
 config/production.yaml
+
+# Development artifacts
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
